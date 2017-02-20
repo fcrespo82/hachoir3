@@ -11,10 +11,10 @@ Creation date: 13 january 2007
 
 from hachoir.parser import Parser
 from hachoir.field import (FieldSet, ParserError, MissingField,
-                           UInt8, Enum, Bit, Bits, RawBytes, RawBits)
+                           UInt8, UInt16, Enum, Bit, Bits, RawBytes, RawBits, String)
 from hachoir.core.endian import BIG_ENDIAN
 from hachoir.core.text_handler import textHandler, hexadecimal
-
+from hachoir.parser.video import MovFile
 
 class AdaptationField(FieldSet):
 
@@ -45,7 +45,6 @@ class AdaptationField(FieldSet):
         if self['length'].value and stuff_len:
             yield RawBits(self, 'stuffing', stuff_len)
 
-
 class Packet(FieldSet):
 
     def __init__(self, *args, **kw):
@@ -63,11 +62,26 @@ class Packet(FieldSet):
     PID = {
         0x0000: "Program Association Table (PAT)",
         0x0001: "Conditional Access Table (CAT)",
-        # 0x0002..0x000f: reserved
+        0x0002: "Transport Stream Description Table (TSDT)",
+        0x0003: "IPMP Control Information Table",
+        # 0x0004..0x000F: reserved
+        0x0010: "NIT, ST",
+        0x0011: "SDT, BAT, ST",
+        0x0012: "EIT, ST, CIT",
+        0x0013: "RST, ST",
+        0x0014: "TDT, TOT, ST",
+        0x0015: "network synchronization",
+        0x0016: "RNT",
+        #0x0017-0x001B: reserved for future use
+        0x001C: "inband signalling",
+        0x001D: "measurement",
+        0x001E: "DIT",
+        0x001F: "SIT",
         # 0x0010..0x1FFE: network PID, program map PID, elementary PID, etc.
-        # TODO: Check above values
-        # 0x0044: "video",
-        # 0x0045: "audio",
+        # 0x0020-0x1FFA	May be assigned as needed to Program Map Tables, elementary streams and other data tables
+        0x1FFB: "DigiCipher 2/ATSC MGT metadata",
+        # 0x1FFC-0x1FFE	May be assigned as needed to Program Map Tables, elementary streams and other data tables
+
         0x1FFF: "Null packet",
     }
 
@@ -94,7 +108,27 @@ class Packet(FieldSet):
             if self._m2ts:
                 size += 4
             size -= (self.current_size // 8)
-            yield RawBytes(self, "payload", size)
+            #yield RawBytes(self, "payload", size)
+        
+            if self["pid"]:
+                yield RawBits(self, "table_id[]", 8)
+                yield RawBits(self, "section_syntax_indicator[]", 1)
+                yield RawBits(self, "ZERO[]", 1)
+                yield RawBits(self, "reserved[]", 2)
+                yield RawBits(self, "section_lenght[]", 12)
+                yield RawBits(self, "transport_stream_id[]", 16)
+                yield RawBits(self, "reserved[]", 2)
+                yield RawBits(self, "version_number[]", 5)
+                yield RawBits(self, "current_next_indicator[]", 1)
+                yield RawBits(self, "section_number[]", 8)
+                yield RawBits(self, "last_section_number[]", 8)
+
+                while not self.eof:
+                    yield textHandler(UInt16(self, "program_number[]", 16), hexadecimal)
+                    yield RawBits(self, "reserved[]", 3)
+                    yield RawBits(self, "network pid or program map pid[]", 13)
+
+            #yield Payload(self, name='PAYLOAD', size=size)
         if self["has_error"].value:
             yield RawBytes(self, "error_correction", 16)
 
@@ -114,6 +148,14 @@ class Packet(FieldSet):
             return "Invalid program identifier (%s)" % self["pid"].display
         return ""
 
+
+class Payload(FieldSet):
+    def __init__(self, *args, **kw):
+        self.my = kw.pop('size', 0)
+        FieldSet.__init__(self, *args, **kw)
+
+    def createFields(self):
+        yield RawBytes(self, "CONTENT", self.my)
 
 # M2TS 4 bytes + 188 bytes payload + 4 errors
 MAX_PACKET_SIZE = 208
