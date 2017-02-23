@@ -13,4 +13,4 @@ hachoir3.egg-info/
 .DS_Store
 
 # VSCode files
-.vscode
+.vscode/
